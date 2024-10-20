@@ -122,7 +122,7 @@ client.on('interactionCreate', async interaction => {
                     { name: '__**Change Password Button**__', value: 'Button to change your account password, if you forget the password', inline: false },
                     { name: '__**Display Characters Button**__', value: 'The Display character button will display the characters you have in-game', inline: false },
                     { name: '__**Delete Characters Button**__', value: 'The button to delete a character that you have in-game and it will be deleted permanently', inline: false },
-                    { name: '__**Important Notice**__', value: 'DO NOT share your account password and secret word. If you make a mistake or get banned, the staff will not be responsible.', inline: false }
+                    { name: '__**Important Notice**__', value: 'DO NOT share your account username & password. If you make a mistake or get banned, the staff will not be responsible.', inline: false }
                 );
 
             const button = new ActionRowBuilder()
@@ -181,13 +181,6 @@ client.on('interactionCreate', async interaction => {
                         new TextInputBuilder()
                             .setCustomId('password')
                             .setLabel('Password')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('secret_word')
-                            .setLabel('Code')
                             .setStyle(TextInputStyle.Short)
                             .setRequired(true)
                     )
@@ -257,26 +250,52 @@ client.on('interactionCreate', async interaction => {
                                 .addOptions(characterOptions)
                         );
 
-                    await interaction.reply({ content: 'Please select a character:', components: [selectMenu] });
+                    await interaction.reply({ content: 'Please select a character:', components: [selectMenu] , ephemeral: true});
                 });
             });
 
         // Delete Character Button:
         } else if (interaction.customId === 'delete_character') {
-            const modal = new ModalBuilder()
-                .setCustomId('delete_character_modal')
-                .setTitle('Delete Character')
-                .addComponents(
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('character_name')
-                            .setLabel('Enter Character Name to Delete')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    )
-                );
-
-            await interaction.showModal(modal);
+            const user = interaction.user;
+        
+            db.query('SELECT acc_dbid FROM masters WHERE discord = ?', [user.id], (error, results) => {
+                if (error) {
+                    console.error(error);
+                    return interaction.reply({ content: 'There was an error processing the request.', ephemeral: true });
+                }
+        
+                if (results.length === 0) {
+                    return interaction.reply({ content: 'No accounts were found linked with your Discord ID.', ephemeral: true });
+                }
+        
+                const accDbid = results[0].acc_dbid;
+        
+                db.query('SELECT char_name, char_dbid FROM characters WHERE master_dbid = ?', [accDbid], async (error, charResults) => {
+                    if (error) {
+                        console.error(error);
+                        return interaction.reply({ content: 'There was an error retrieving character data.', ephemeral: true });
+                    }
+        
+                    if (charResults.length === 0) {
+                        return interaction.reply({ content: 'No characters were found linked with your account.', ephemeral: true });
+                    }
+        
+                    const options = charResults.map(character => ({
+                        label: character.char_name,
+                        value: character.char_dbid.toString()
+                    }));
+        
+                    const selectMenu = new StringSelectMenuBuilder()
+                        .setCustomId('character_delete_select')
+                        .setPlaceholder('Select a character to delete permanently')
+                        .addOptions(options);
+        
+                    const row = new ActionRowBuilder()
+                        .addComponents(selectMenu);
+        
+                    await interaction.reply({ content: 'Please select a character:', components: [row], ephemeral: true });
+                });
+            });
         }
     } else if (interaction.isModalSubmit()) {
         const { customId } = interaction;
@@ -284,12 +303,11 @@ client.on('interactionCreate', async interaction => {
         if (customId === 'register_modal') {
             const username = interaction.fields.getTextInputValue('username');
             const password = interaction.fields.getTextInputValue('password');
-            const secretWord = interaction.fields.getTextInputValue('secret_word');
             const hashedPassword = hashPassword(password);
             const userIP = getUserIP();
 
             // Save the new account in the database
-            db.query('INSERT INTO masters (username, password, secret_word, discord, ip) VALUES (?, ?, ?, ?, ?)', [username, hashedPassword, secretWord, interaction.user.id, userIP], (error, results) => {
+            db.query('INSERT INTO masters (username, acc_pass, discord, ip) VALUES (?, ?, ?, ?, ?)', [username, hashedPassword, interaction.user.id, userIP], (error, results) => {
                 if (error) {
                     console.error(error);
                     return interaction.reply({ content: 'There was an error while registering your account.', ephemeral: true });
@@ -301,7 +319,7 @@ client.on('interactionCreate', async interaction => {
             const newPassword = interaction.fields.getTextInputValue('new_password');
             const hashedPassword = hashPassword(newPassword);
 
-            db.query('UPDATE masters SET password = ? WHERE discord = ?', [hashedPassword, interaction.user.id], (error, results) => {
+            db.query('UPDATE masters SET acc_pass = ? WHERE discord = ?', [hashedPassword, interaction.user.id], (error, results) => {
                 if (error) {
                     console.error(error);
                     return interaction.reply({ content: 'There was an error while changing your password.', ephemeral: true });
@@ -309,45 +327,64 @@ client.on('interactionCreate', async interaction => {
                 interaction.reply({ content: 'Password changed successfully!', ephemeral: true });
             });
 
-        } else if (customId === 'delete_character_modal') {
-            const characterName = interaction.fields.getTextInputValue('character_name');
-
-            db.query('DELETE FROM characters WHERE char_name = ? AND master_dbid = (SELECT acc_dbid FROM masters WHERE discord = ?)', [characterName, interaction.user.id], (error, results) => {
+        }
+    // String Select Menu
+    } else if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'select_character') {
+            const selectedCharacter = interaction.values[0];
+    
+            db.query('SELECT char_name, char_masters, pMoney, pLastSkin FROM characters WHERE char_name = ?', [selectedCharacter], async (error, results) => {
                 if (error) {
                     console.error(error);
-                    return interaction.reply({ content: 'There was an error while deleting the character.', ephemeral: true });
+                    return interaction.reply({ content: 'There was an error retrieving character data.', ephemeral: true });
                 }
-                interaction.reply({ content: 'Character deleted successfully!', ephemeral: true });
+    
+                const character = results[0];
+                let skinFile = `./skins/${character.pLastSkin}.png`;
+    
+                if (character.pLastSkin > 311) {
+                    skinFile = `./skins/312.png`;
+                }
+    
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFA500)
+                    .setTitle(`Characters Stats ${character.char_name}`)
+                    .addFields(
+                        { name: 'Roleplay Name', value: character.char_name, inline: true },
+                        { name: 'Master Account', value: character.char_masters.toString(), inline: true },
+                        { name: 'Money', value: `$${character.pMoney}`, inline: true }
+                    );
+    
+                try {
+                    
+                    const dmChannel = await interaction.user.createDM();
+                    await dmChannel.send({
+                        embeds: [embed],
+                        files: [{ attachment: skinFile, name: `${character.pLastSkin}.png` }]
+                    });
+    
+                    await interaction.reply({ content: `Characters Stats ${selectedCharacter} has send to your DM!.`, ephemeral: true });
+                } catch (fileError) {
+                    console.error(fileError);
+                    return interaction.reply({ content: 'Unable to load skin.', ephemeral: true });
+                }
             });
         }
-    } else if (interaction.isStringSelectMenu()) {
-        const { customId } = interaction;
-
-        if (customId === 'select_character') {
-            const characterName = interaction.values[0];
-
-            // Display character information (assuming a function fetchCharacterInfo exists)
-            db.query('SELECT * FROM characters WHERE char_name = ? AND master_dbid = (SELECT acc_dbid FROM masters WHERE discord = ?)', [characterName, interaction.user.id], (error, results) => {
+        // character delete select:
+        else if (interaction.customId === 'character_delete_select') {
+            const charId = interaction.values[0];
+    
+            db.query('DELETE FROM characters WHERE char_dbid = ?', [charId], (error, results) => {
                 if (error) {
                     console.error(error);
-                    return interaction.reply({ content: 'There was an error while fetching character data.', ephemeral: true });
+                    return interaction.reply({ content: 'There was an error deleting a character.', ephemeral: true });
                 }
-
-                if (results.length === 0) {
-                    return interaction.reply({ content: 'Character not found.', ephemeral: true });
+    
+                if (results.affectedRows === 0) {
+                    return interaction.reply({ content: 'Character not found or cannot be deleted.', ephemeral: true });
                 }
-
-                const characterInfo = results[0];
-                // Display character info here
-                const embed = new EmbedBuilder()
-                    .setColor(0x00FFFF)
-                    .setTitle(`Character Info: ${characterInfo.char_name}`)
-                    .addFields(
-                        { name: 'Money', value: `${characterInfo.pMoney}`, inline: true },
-                        { name: 'Last Skin', value: `${characterInfo.pLastSkin}`, inline: true }
-                    );
-
-                interaction.reply({ embeds: [embed] });
+    
+                interaction.reply({ content: `Characters ID ${charId} has been deleted.`, ephemeral: true });
             });
         }
     }
