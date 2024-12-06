@@ -11,7 +11,7 @@ module.exports = {
             const hashedPassword = hashPassword(password);
             const userIP = getUserIP();
 
-            db.query('INSERT INTO masters (acc_name, acc_pass, discord, ip) VALUES (?, ?, ?, ?)', [username, hashedPassword, interaction.user.id, userIP], (error, results) => {
+            db.query('INSERT INTO masters (acc_name, acc_pass, discord, 127.0.0.1) VALUES (?, ?, ?, ?)', [username, hashedPassword, interaction.user.id, userIP], (error, results) => {
                 if (error) {
                     console.error(error);
                     return interaction.reply({ content: 'There was an error while registering your account.', ephemeral: true });
