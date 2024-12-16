@@ -10,7 +10,7 @@ module.exports = {
     async execute(interaction) {
         const { channelId, member } = interaction;
 
-        if (channelId !== '1284103870661922897') {
+        if (channelId !== '1318194683406454845') {
             return interaction.reply({ content: "This command can only be used in the specified channel.", ephemeral: true });
         }
 
